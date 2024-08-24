@@ -1,66 +1,52 @@
-
 from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, create_access_token, get_jwt_identity
 from app.models.user import User
-from flask_jwt_extended import jwt_required, create_access_token, get_jwt_identity, generate_password_hash
 from app.extensions import bcrypt, db
 import logging
 
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+
+# Create a Blueprint
 user_bp = Blueprint('users', __name__, url_prefix='/api/v1/users')
 
 @user_bp.route('/register', methods=['POST'])
 def register_user():
-    try:
-        data = request.json
-        print(f"Received user data: {data}")  # Print received data
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid data'}), 400
 
-        required_fields = ['name', 'email', 'password', 'address', 'phone_number']
-        if not all(data.get(field) for field in required_fields):
-            print(f"Missing required fields: {', '.join(field for field in required_fields if not data.get(field))}")
+    try:
+        name = data.get('name')
+        email = data.get('email')
+        password = data.get('password')
+        address = data.get('address')
+        phone_number = data.get('phone_number')
+        agree_to_terms = data.get('agreeToTerms')
+
+        # Validate input
+        if not all([name, email, password, address, phone_number, agree_to_terms]):
             return jsonify({'error': 'All fields are required'}), 400
 
-        existing_user = User.query.filter_by(email=data['email']).first()
-        if existing_user:
-            print(f"Email {data['email']} already exists")
-            return jsonify({'error': 'Email already exists'}), 409
+        # Check if user already exists
+        if User.query.filter_by(email=email).first():
+            return jsonify({'error': 'User already exists'}), 400
 
-        hashed_password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
+        # Hash password
+        hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
 
-        new_user = User(
-            name=data['name'],
-            email=data['email'],
-            password=hashed_password,
-            address=data['address'],
-            phone_number=data['phone_number'],
-            role=data.get('role', 'customer')
-        )
-
-        print(f"Created new user object: {new_user}")  # Print the created user object
-
+        # Create new user
+        new_user = User(name=name, email=email, password=hashed_password, address=address, phone_number=phone_number)
         db.session.add(new_user)
         db.session.commit()
 
-        response_user = {
-            'id': new_user.id,
-            'name': new_user.name,
-            'email': new_user.email,
-            'phone_number': new_user.phone_number,
-            'address': new_user.address,
-            'role': new_user.role,
-            'created_at': new_user.created_at,
-            'updated_at': new_user.updated_at
-        }
-
-        print(f"Response data: {response_user}")  # Print the response data
-
-        return jsonify({
-            'message': f'User {new_user.name} has been successfully created',
-            'user': response_user
-        }), 201
-
+        return jsonify({'message': 'User created successfully'}), 201
     except Exception as e:
-        db.session.rollback()
-        print(f"An error occurred: {str(e)}")  # Print the exception message
+        logging.error(f'Error creating user: {e}', exc_info=True)
         return jsonify({'error': 'An error occurred during registration'}), 500
+
+# Ensure the other routes are similarly defined within the same blueprint
+
 
 @user_bp.route('/login', methods=['POST'])
 def login_user():
@@ -76,12 +62,12 @@ def login_user():
 
         if user and bcrypt.check_password_hash(user.password, password):
             access_token = create_access_token(identity=user.id)
-            logging.debug(f"User {user.id} logged in successfully.")
             return jsonify({'access_token': access_token, 'user_id': user.id}), 200
         else:
             return jsonify({'error': 'Invalid email or password'}), 401
 
     except Exception as e:
+        logging.error(f"An error occurred during login: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @user_bp.route('/edit/<int:user_id>', methods=['PUT'])
@@ -128,6 +114,7 @@ def edit_user(user_id):
 
     except Exception as e:
         db.session.rollback()
+        logging.error(f"An error occurred during user update: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @user_bp.route('/delete/<int:user_id>', methods=['DELETE'])
@@ -151,6 +138,7 @@ def delete_user(user_id):
 
     except Exception as e:
         db.session.rollback()
+        logging.error(f"An error occurred during user deletion: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @user_bp.route('/current_user', methods=['GET'])
@@ -176,4 +164,7 @@ def get_current_user():
             return jsonify({'error': 'User not found'}), 404
 
     except Exception as e:
+        logging.error(f"An error occurred during current user retrieval: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+
